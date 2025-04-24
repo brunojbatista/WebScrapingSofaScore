@@ -1,0 +1,8 @@
+/SofaScoreCache
+/Library
+/venv
+__pycache__
+
+*.json
+*.docx
+*.xlsx
