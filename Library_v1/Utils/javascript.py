@@ -368,7 +368,7 @@ function hasAttrValue(xpath_or_element, attr_name, attr_value, ref = document, t
 }
 
 // Irá retornar o valor do estilo até o timeout definido
-function getStyle(xpath_or_element, style_name, ref = document, timeout = 60000) {
+function getComputedStyle(xpath_or_element, style_name, ref = document, timeout = 60000) {
     return new Promise(
         (resolve, reject) => {
 			if (isElement(xpath_or_element)) {
@@ -407,11 +407,11 @@ function getStyle(xpath_or_element, style_name, ref = document, timeout = 60000)
 function waitChangeStyle(xpath_or_element, style_name, fn, ref = document, timeout = 60000) {
     return new Promise(
         async (resolve, reject) => {
-            var value_before = await getStyle(xpath_or_element, style_name, ref, 0)
+            var value_before = await getComputedStyle(xpath_or_element, style_name, ref, 0)
             await fn()
             running(
                 async () => {
-                    var value_current = await getStyle(xpath_or_element, style_name, ref, 0)
+                    var value_current = await getComputedStyle(xpath_or_element, style_name, ref, 0)
                     console.log('value_before', value_before)
                     console.log('value_current', value_current)
                     return value_current != value_before
