@@ -7,6 +7,7 @@ from Library_v1.Driver.DriverInterface import DriverInterface
 from Automation.View.BaseView import BaseView
 from Automation.Model.EventCell import EventCell
 from Automation.Model.MatchInformation import MatchInformation
+from Automation.Model.TimeStatistics import TimeStatistics
 from Library_v1.Utils.javascript import (
     JAVASCRIPT_CODE,
 )
@@ -146,6 +147,9 @@ SCRIPT_JS = JAVASCRIPT_CODE + r"""
     async function read_statistics_match() {
         console.log("-------------------------------------------")
         console.log(">> read_statistics_match:")
+        const link_xpath = "//div[./div/div/span[text()='Partidas']]/div[last()]/div[last()]/div[2]/div/div/div[1]/div/div[last()]/a"
+        const id = await getAttr(link_xpath, 'data-id')
+        
         const base_xpath = "//div[./div/div/span[text()='Partidas']]/div[last()]/div[last()]/div[2]/div/div/div[1]/div/div[last()]/div[last()]/div[last()]/div[@data-panelid]/div"
 
         const read_base_xpath = `${base_xpath}/div[@data-panelid]/div`
@@ -169,6 +173,7 @@ SCRIPT_JS = JAVASCRIPT_CODE + r"""
         if (!(await hasElement(get_section_xpath('Visão geral da partida')))) throw new Error("Não foi possível carregar a aba de estatísticas")
 
         let stats = {
+            id,
             'ft': {},
             'ht': {},
             '2t': {},
@@ -607,7 +612,7 @@ class LeaguePage(BaseView):
 
         return match_information
     
-    def read_statistics_match(self, ):
+    def read_statistics_match(self, ) -> List[TimeStatistics]:
         SCRIPT = SCRIPT_JS + r"""
             const callback = arguments[arguments.length - 1];
 
@@ -631,4 +636,20 @@ class LeaguePage(BaseView):
             SCRIPT
         )
 
-        print(f"statistics_match: {statistics_match}")
+        # print(f"statistics_match: {statistics_match}")
+
+        match = []
+        for time in ['ft', 'ht', '2t']:
+            team = TimeStatistics()
+            team.set_all({
+                "id": statistics_match['id'],
+                "time": time,
+                **statistics_match[time]
+            })
+
+            print("-"*80)
+            print(team.get_all())
+
+            match.append(team)
+
+        return match

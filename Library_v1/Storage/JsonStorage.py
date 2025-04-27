@@ -1,92 +1,135 @@
 from filelock import Timeout, FileLock
-from filelock._error import Timeout
 from json.decoder import JSONDecodeError
 import json
 import re
 import os
-from Library_v1.Storage.StorageInterface import StorageInterface
+from datetime import datetime, time
 
-def encoder(obj):
-    from datetime import datetime
-
-    if isinstance(obj, datetime):
-        return {
-            "__type": "datetime",
-            "__value": str(obj)
-        }
-    raise TypeError(f"Não foi possível serializar o objeto '{obj}'")
-
-def decoder(obj):
-    if not(isinstance(obj, dict)):
-        return obj;
-    elif "__type" not in obj:
-        return obj;
-    else:
-        from datetime import datetime
-        
-        if obj["__type"] == "datetime":
-            return datetime.fromisoformat(obj['__value'])
-
-    raise TypeError(f"Não foi possível desserializar o objeto '{obj}'")
-    
-
-
-class JsonStorage(StorageInterface):
+class JsonStorage:
     def __init__(self, filepath, timeout=60, indent=None):
-        if re.search(r'\.json$', filepath) == None:
-            filepath = f"{filepath}.json";
-        
-        self.filepath = filepath;
-        self.timeout = timeout;
-        self.indent = indent;
+        if re.search(r'\.json$', filepath) is None:
+            filepath = f"{filepath}.json"
+
+        self.filepath = filepath
+        self.timeout = timeout
+        self.indent = indent
 
         # Locker
-        self.lock_path = "{}.lock".format(self.filepath);
-        self.locker = FileLock(self.lock_path, timeout=1);
+        self.lock_path = f"{self.filepath}.lock"
+        self.locker = FileLock(self.lock_path, timeout=1)
+
+        # Lista de serializáveis
+        self.serialize = []
+
+        # Adicionando serializadores padrão
+        self.add_serialize(
+            'datetime', 
+            datetime, 
+            lambda obj: obj.isoformat(), 
+            lambda obj: datetime.fromisoformat(obj['__value'])
+        )
+
+        self.add_serialize(
+            'time', 
+            time, 
+            lambda obj: obj.isoformat(), 
+            lambda obj: time.fromisoformat(obj['__value'])
+        )
+
+    def add_serialize(self, name: str, type_: type, encoder: callable, decoder: callable):
+        """
+        Adiciona uma nova regra de serialização e desserialização.
+        """
+        if not any(s['name'] == name for s in self.serialize):
+            self.serialize.append({
+                "name": name,
+                "type": type_,
+                "encoder": encoder,
+                "decoder": decoder,
+            })
+
+    def get_seriable(self, key: str, value):
+        for s in self.serialize:
+            if key == 'name' and s[key] == value:
+                return s
+            elif key == 'type' and isinstance(value, s[key]):
+                return s
+        raise TypeError(f"Não foi possível encontrar o objeto serializável: '{key}'")
+
+    def get_decoder(self, name: str) -> callable:
+        return self.get_seriable('name', name)['decoder']
+
+    def get_encoder(self, obj):
+        return self.get_seriable('type', obj)
+
+    def decoder(self, obj):
+        """
+        Função para desserializar objetos não padrão de JSON.
+        """
+        if not isinstance(obj, dict):
+            return obj
+        elif "__type" not in obj:
+            return obj
+        else:
+            decoder = self.get_decoder(obj["__type"])
+            return decoder(obj)
+
+    def encoder(self, obj):
+        seriable = self.get_encoder(obj)
+        return {
+            "__type": seriable['name'],
+            "__value": seriable['encoder'](obj)
+        }
 
     def lock(self):
         try:
-            self.locker.acquire(timeout=self.timeout);
+            self.locker.acquire(timeout=self.timeout)
         except Timeout:
             raise TimeoutError(f"Expirou a espera pelo arquivo '{self.filepath}'")
-        return True;
-    
+        return True
+
     def unlock(self):
-        self.locker.release();
-        return True;
+        self.locker.release()
+        return True
 
     def write(self, data):
         try:
+            serializable_data = json.dumps(data, ensure_ascii=False, default=self.encoder, indent=self.indent)
             with open(self.filepath, 'w', encoding='utf-8') as file:
-                file.write(json.dumps(data, ensure_ascii=False, default=encoder, indent=self.indent))
-                file.close()
-            return True;
+                file.write(serializable_data)
+            return True
         except FileNotFoundError:
-            return False;
+            return False
 
     def read(self):
+        """
+        Lê os dados do arquivo e os desserializa.
+        """
         try:
-            try:
-                with open(self.filepath, encoding='utf-8') as file:
-                    content = json.loads(file.read(), object_hook=decoder);
-                    file.close()
-            except JSONDecodeError:
-                return None
-            return content;
+            with open(self.filepath, encoding='utf-8') as file:
+                return json.load(file, object_hook=self.decoder)
         except FileNotFoundError:
+            return None
+        except JSONDecodeError:
             return None
 
     def clean(self):
+        """
+        Limpa o conteúdo do arquivo JSON.
+        """
         try:
             with open(self.filepath, 'r+') as f:
                 f.truncate(0)
-            return True;
+            return True
         except FileNotFoundError:
-            return False;
+            return False
 
     def delete(self):
+        """
+        Remove o arquivo JSON.
+        """
         try:
             os.remove(self.filepath)
-            return True;
+            return True
         except FileNotFoundError:
-            return False;
+            return False

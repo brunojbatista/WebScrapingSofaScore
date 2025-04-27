@@ -485,6 +485,9 @@ def get_date(year, month=1, day=1, hour=0, minute=0, second=0):
         second=second,
     ).astimezone(RECIFE_TIMEZONE)
 
+def get_time(hour: int, minute: int = 0) -> time:
+    return time(hour=hour, minute=minute)
+
 def add_hour(date, hours = 1):
     new_date = date + (hours*HOUR);
     return new_date.astimezone(RECIFE_TIMEZONE)
