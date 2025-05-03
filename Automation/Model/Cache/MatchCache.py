@@ -8,30 +8,29 @@ from Library_v1.Directory.Directory import Directory
 from Library_v1.Storage.JsonStorage import JsonStorage
 
 from Automation.Model.Match import Match
+from Automation.Model.Competitions.Competition import Competition
 
 class MatchCache():
-    def __init__(self, date: datetime):
+    def __init__(self, date: datetime = None):
         self.relativepath = "Caching/Matches"
+        self.formattedDate: str = None
+        self.filename: str = None
+        self.dir: Directory = None
+        # self.dir.create()
+        self.filepath: str = None
+        self.json: JsonStorage = None
+        self.data: list = []
+        
+        if not date is None: self.init(date)
+
+    def init(self, date: datetime):
+        if not self.formattedDate is None: return
         self.formattedDate = format_date(date, "<YYYY>-<MM>-<DD>")
         self.filename = f"{self.formattedDate}-matches-list.json"
         self.dir = Directory(self.relativepath)
         self.dir.create()
         self.filepath = Directory.separator(f"{self.dir.get_path()}/{self.filename}")
         self.json = JsonStorage(self.filepath, indent=4)
-
-        def match_decoder(obj) -> Match:
-            m = Match()
-            m.set_all(obj.get('__value'))
-            return m
-
-        self.json.add_serialize(
-            'match',
-            Match,
-            lambda obj: obj.get_all(),
-            lambda obj: match_decoder(obj),
-        )
-
-        self.data: list = []
         self.read()
 
     def read(self, ) -> list:
@@ -46,20 +45,24 @@ class MatchCache():
         return len(self.data)
     
     def add(self, match: Match) -> bool:
-        id = match.generateId()
-        if id is None: return False
+        index = match.generateIndex()
+        if index is None: return False
+        self.init(match.get('date'))
         hasFound = False
-        for index, m in enumerate(self.data):
-            if m['id'] == id:
-                self.data[index] = {
-                    "id": id,
-                    "match": match,
-                }
-                hasFound = True
-                break;
+        for indexData, m in enumerate(self.data):
+            if m['index'] == index:
+                if m['match'] != match:
+                    self.data[indexData] = {
+                        "index": index,
+                        "match": match,
+                    }
+                    hasFound = True
+                    break;
+                else:
+                    return False
         if not hasFound:
             self.data.append({
-                "id": id,
+                "index": index,
                 "match": match,
             })
         self.data = sorted(self.data, key=lambda m: m['match'].get('date'))
@@ -67,11 +70,12 @@ class MatchCache():
         return True
     
     def remove(self, match: Match) -> bool:
-        id = match.generateId()
-        if id is None: return False
+        index = match.generateIndex()
+        if index is None: return False
+        self.init(match.get('date'))
         targetIndex = -1
         for index, m in enumerate(self.data):
-            if m['id'] == id:
+            if m['index'] == index:
                 targetIndex = index;
                 break;
         if targetIndex >= 0: 

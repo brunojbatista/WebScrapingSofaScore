@@ -6,8 +6,12 @@ from typing import (
 from Library_v1.Driver.DriverInterface import DriverInterface
 from Automation.View.BaseView import BaseView
 from Automation.Model.EventCell import EventCell
-from Automation.Model.MatchInformation import MatchInformation
-from Automation.Model.TimeStatistics import TimeStatistics
+from Automation.Model.Match import Match
+from Automation.Model.Time.TimeStatistics import TimeStatistics
+from Automation.Model.Time.HalfTimeStatistics import HalfTimeStatistics
+from Automation.Model.Time.SecondTimeStatistics import SecondTimeStatistics
+from Automation.Model.Time.FullTimeStatistics import FullTimeStatistics
+from Automation.Model.Competitions.Competition import Competition
 from Library_v1.Utils.javascript import (
     JAVASCRIPT_CODE,
 )
@@ -20,6 +24,9 @@ from Library_v1.Utils.time import (
     date_now,
     get_day_midnight,
     parse_date_with_format,
+    format_date,
+    parse_time,
+    add_day,
 )
 
 SCRIPT_JS = JAVASCRIPT_CODE + r"""
@@ -110,9 +117,39 @@ SCRIPT_JS = JAVASCRIPT_CODE + r"""
 
         let id = await getAttr(`${base_xpath}/a`, 'data-id')
         let country = await getText(`${first_section}/div[1]//li[1]/a`)
-        let country_url = await getAttr(`${first_section}/div[1]//li[1]/a`, 'href')
         let name_competition = await getText(`${first_section}/div[1]//li[2]/a`)
         let competition_url = await getAttr(`${first_section}/div[1]//li[2]/a`, 'href')
+
+        // Buscar o placar do jogo
+        let home_ft = null
+        let away_ft = null
+        const hour_and_date_xpath = `${first_section}/div[2]/div[./div[@data-testid='left_team']]/div[not(@data-testid)]/div`
+        if ((await hasElement(`${hour_and_date_xpath}/div/div[1]//span[@data-testid='left_score']`, document, 100))) {
+            home_ft = await getText(`${hour_and_date_xpath}/div/div[1]//span[@data-testid='left_score']`)
+        }
+        if ((await hasElement(`${hour_and_date_xpath}/div/div[1]//span[@data-testid='right_score']`, document, 100))) {
+            away_ft = await getText(`${hour_and_date_xpath}/div/div[1]//span[@data-testid='right_score']`)
+        }
+
+        // Buscar o horario do jogo
+        let date = null
+        let time = null
+        let lines = await getElements(`${first_section}/div[2]/div[not(@data-testid='scorer_list')]`, document, 100)
+        if (lines.length == 1) { // Jogo hoje ou futuro
+            let line_base_xpath = `${first_section}/div[2]/div[not(@data-testid='scorer_list')]`
+            // Jogo de hoje
+            if (await hasElement(`${line_base_xpath}/div[not(@data-testid)]/div/span[text()='Hoje' or text()='Amanhã']`, document, 100)) {
+                time = await getText(`${line_base_xpath}/div[not(@data-testid)]/div/span[1]`)
+                date = await getText(`${line_base_xpath}/div[not(@data-testid)]/div/span[2]`)
+            } else { // Jogo futuro
+                date = await getText(`${line_base_xpath}/div[not(@data-testid)]/div/span[1]`)
+                time = await getText(`${line_base_xpath}/div[not(@data-testid)]/div/span[2]`)
+            }
+        } else { // Jogo passado
+            let line_base_xpath = `(${first_section}/div[2]/div[not(@data-testid='scorer_list')][1])`
+            date = await getText(`${line_base_xpath}/div/span[1]`)
+            time = await getText(`${line_base_xpath}/div/span[2]`)
+        }
 
         let hometeam_url = await getAttr(`${first_section}/div[last()]//div[@data-testid='left_team']//a`, 'href')
         let hometeam_emblem_url = await getAttr(`${first_section}/div[last()]//div[@data-testid='left_team']//a//img`, 'src')
@@ -122,15 +159,15 @@ SCRIPT_JS = JAVASCRIPT_CODE + r"""
         let awayteam_emblem_url = await getAttr(`${first_section}/div[last()]//div[@data-testid='right_team']//a//img`, 'src')
         let awayteam = await getText(`${first_section}/div[last()]//div[@data-testid='right_team']//a//*[name()='bdi']`)
 
-        country_url = `https://www.sofascore.com${country_url}`
         competition_url = `https://www.sofascore.com${competition_url}`
         hometeam_url = `https://www.sofascore.com${hometeam_url}`
         awayteam_url = `https://www.sofascore.com${awayteam_url}`
 
         info = {
             id,
+            date,
+            time,
             country,
-            country_url,
             name_competition,
             competition_url,
             hometeam,
@@ -139,6 +176,8 @@ SCRIPT_JS = JAVASCRIPT_CODE + r"""
             awayteam,
             awayteam_url,
             awayteam_emblem_url,
+            home_ft,
+            away_ft,
         }
 
         return info
@@ -569,7 +608,7 @@ class LeaguePage(BaseView):
 
         return status
 
-    def read_information_match(self, ) -> MatchInformation:
+    def read_information_match(self, competition: Competition) -> Match:
         SCRIPT = SCRIPT_JS + r"""
             const callback = arguments[arguments.length - 1];
 
@@ -592,25 +631,38 @@ class LeaguePage(BaseView):
         match_data = self.driver.get().execute_async_script(
             SCRIPT
         )
-        # print(f"match_data: {match_data}")
 
-        match_information: MatchInformation = MatchInformation()
 
-        match_information.set_all({
-            'id': match_data['id'],
-            'country': match_data['country'],
-            'country_url': match_data['country_url'],
-            'name_competition': match_data['name_competition'],
-            'competition_url': match_data['competition_url'],
-            'hometeam': match_data['hometeam'],
-            'hometeam_url': match_data['hometeam_url'],
-            'hometeam_emblem_url': match_data['hometeam_emblem_url'],
-            'awayteam': match_data['awayteam'],
-            'awayteam_url': match_data['awayteam_url'],
-            'awayteam_emblem_url': match_data['awayteam_emblem_url'],
-        })
+        if not re.search(r"(\d{2})[\/\-](\d{2})[\/\-](\d{4})", match_data['date']):
+            if re.search(r"^\s*hoje\s*$",  match_data['date'], flags=re.I):
+                match_data['date'] = get_day_midnight(date_now())
+            elif re.search(r"^\s*amanh.\s*$",  match_data['date'], flags=re.I):
+                match_data['date'] = get_day_midnight(add_day(date_now()))
+            else:
+                raise ValueError(f"Não identificado o parse da data: {match_data['date']}")
+        else:
+            match_data['date'] = parse_date_with_format(match_data['date'], "<dd>/<mm>/<yyyy>")
+        
+        match_data['time'] = parse_time(match_data['time'])
 
-        return match_information
+        print(f"match_data: {match_data}")
+
+        match: Match = Match(
+            id = match_data['id'],
+            date = match_data['date'],
+            time = match_data['time'],
+            competition = competition,
+            hometeam = match_data['hometeam'],
+            hometeam_url = match_data['hometeam_url'],
+            hometeam_emblem_url = match_data['hometeam_emblem_url'],
+            awayteam = match_data['awayteam'],
+            awayteam_url = match_data['awayteam_url'],
+            awayteam_emblem_url = match_data['awayteam_emblem_url'],
+            home_ft = match_data['home_ft'],
+            away_ft = match_data['away_ft']
+        )
+
+        return match
     
     def read_statistics_match(self, ) -> List[TimeStatistics]:
         SCRIPT = SCRIPT_JS + r"""
@@ -639,17 +691,40 @@ class LeaguePage(BaseView):
         # print(f"statistics_match: {statistics_match}")
 
         match = []
-        for time in ['ft', 'ht', '2t']:
-            team = TimeStatistics()
-            team.set_all({
-                "id": statistics_match['id'],
-                "time": time,
-                **statistics_match[time]
-            })
 
-            print("-"*80)
-            print(team.get_all())
+        match.append(
+            HalfTimeStatistics(
+                id=statistics_match['id'],
+                **statistics_match['ht']
+            )
+        )
 
-            match.append(team)
+        match.append(
+            SecondTimeStatistics(
+                id=statistics_match['id'],
+                **statistics_match['2t']
+            )
+        )
+
+        match.append(
+            FullTimeStatistics(
+                id=statistics_match['id'],
+                **statistics_match['ft']
+            )
+        )
+
+
+        # for time in ['ft', 'ht', '2t']:
+        #     # team = TimeStatistics()
+        #     team = TimeStatistics(
+        #         id=statistics_match['id'],
+        #         time=time,
+        #         **statistics_match[time]
+        #     )
+
+        #     print("-"*80)
+        #     print(team.get_all())
+
+        #     match.append(team)
 
         return match
